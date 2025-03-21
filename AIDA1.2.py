@@ -225,8 +225,8 @@ def run_AIDA():
       gen_visualization(data,ai_vis_suggestion,user_vis_suggestion)
 
 def run_AIDA_CSV():
-    data = pd.read_csv("titanic.csv")
-    print("Loaded titanic dataset")
+    data = pd.read_csv("YOUR CSV FILE NAME")
+    print("Loaded CSV dataset")
     print(data.head(10))
     input_user = input("Question About The Data? (If no Type XX): ")
     if input_user == "XX":
