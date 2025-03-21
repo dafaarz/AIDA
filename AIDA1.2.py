@@ -12,10 +12,10 @@ from rich.markdown import Markdown
 console = Console()
 
 # Load Database
-server = "DESKTOP-U593NUK\SQLEXPRESS" 
-database = "DB_TESTING"
-username = "DB_DAPA"
-password = "dapa12345"
+server = "********"
+database = "********"
+username = "********"
+password = "********"
 
 conn = pyodbc.connect(
      f'DRIVER={{SQL Server}};SERVER={server};DATABASE={database};UID={username};PWD={password}'
