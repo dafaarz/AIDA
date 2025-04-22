@@ -89,11 +89,16 @@ def get_data(data_query,column_name):
     st.dataframe(results_dataframe)
     return results_dataframe
 
-def analyze_data(data_from_query,user_question):
+def analyze_data(data_from_query,user_question,previous_insight = None):
     # Get User Question to Analyze DataFrame
     promt_temp = PromptTemplate.from_template("Analyze this data and provide key insight based only on the data given : \n {analyze_data} \n\n"
-                                              "And Question that is asked to you : \n{question}\n"
-                                              "Also provide some numeric calculation based on the data to prove this analysis. Kept the insight brief and easy to read in the terminal ")
+                                              "And Question that is asked to you : \n{question}\n")
+    
+    if previous_insight:
+        promt_temp += ("Previous insight generated : {prev_insight} \n "
+                       "User was not satisfied with the results generated above, refine or add new insight based on the feedback (Question) above \n")
+
+    promt_temp += ("Also provide numeric calculations based on the data to prove this analysis. Keep it brief and easy to read")    
     
     data_summary = {
         "collumn" : list(data_from_query.columns),
@@ -102,9 +107,14 @@ def analyze_data(data_from_query,user_question):
         "statistics" : data_from_query.describe(include ="all").to_dict()
     }
 
-    promt = promt_temp.invoke({"analyze_data" : data_summary,"question" : user_question}) 
+    if previous_insight :
+        promt = promt_temp.invoke({"analyze_data" : data_summary,
+                                "question" : user_question,
+                                "prev_insight" : previous_insight or ""})     
+    else :
+        promt = promt_temp.invoke({"analyze_data" : data_summary,"question" : user_question})   
     insight = llm.invoke(promt).content
-    st.markdown(insight)
+    #st.markdown(insight)
     return insight
 
 def suggest_chart(data_from_query,user_question,insight):
@@ -195,32 +205,79 @@ def gen_visualization(data,chart_type,user_input):
 #Streamlit UI
 st.title("Analyze and Visualize Data With AI")
 preview_tables()
-with st.form("table_select_form"):
-    table_name = st.text_input("Enter Table Name To Use : ", key="table_name_input")
-    submitted = st.form_submit_button("Sumbit")
-if submitted and table_name:
+#Form 1 (Select Tables)
+if "selected_table" not in st.session_state:
+    with st.form("table_select_form"):
+        table_name = st.text_input("Enter Table Name To Use : ", key="table_name_input")
+        submitted = st.form_submit_button("Sumbit")
+        if submitted and table_name:
+            st.session_state["selected_table"] = table_name
+if "selected_table" in st.session_state:
+    table_name = st.session_state["selected_table"]
     table_schema = get_table_info(table_name)
     preview_data(table_name)
-    with st.form("nl_query_form"):
-        nl_query = st.text_input("Query : ")
-        submitted_query = st.form_submit_button("Submit")
-    if submitted_query and nl_query:
+
+    #Form 2 (Natural Language to SQL)
+    if "nl_query_result" not in st.session_state:
+        with st.form("nl_query_form"):
+            nl_query = st.text_input("Query : ")
+            submitted_query = st.form_submit_button("Submit")
+        if submitted_query and nl_query:
+            query_result, column = natural_into_query(table_name,table_schema,nl_query)
+            st.session_state["nl_query_result"] = query_result
+            st.session_state["nl_column"] = column
+    if "nl_query_result" in st.session_state:
         st.subheader("Data Queried")
-        query_result, column = natural_into_query(table_name,table_schema,nl_query)
-        result_data = get_data(query_result,column)
-        with st.form("analyze question form"):
-            analyze_question = st.text_input("What Do You Want To Know About This Data? : ")
-            submitted_question = st.form_submit_button("Submit")
-        if submitted_question and analyze_question:
+        result_data = get_data(st.session_state["nl_query_result"],st.session_state["nl_column"])
+        if "last_insight" not in st.session_state:
+            with st.form("analyze question form"):
+                analyze_question = st.text_input("What Do You Want To Know About This Data? : ",key="analyze_question_input")
+                submitted_question = st.form_submit_button("Analyze")
+            if submitted_question and analyze_question:
+                analyze_insight = analyze_data(result_data, analyze_question)
+                st.session_state["last_insight"] = analyze_insight
+                st.session_state["analyze_question"] = analyze_question
+
+        if "last_insight" in st.session_state:
             st.subheader("AI Generated Insight")
-            analyze_insight = analyze_data(result_data,analyze_question)
-            st.subheader("AI Visualization Recommendation")
-            ai_vis_recomendation = suggest_chart(result_data,analyze_question,analyze_insight)
-            with st.form("vis_inquiry_form"):
-                user_vis_inquiry = st.text_input("Choose Which Visualization or Request one : ")
-                submitted_question_vis = st.form_submit_button("Submit")
-            if submitted_question_vis and user_vis_inquiry:
-                gen_visualization(result_data,ai_vis_recomendation,user_vis_inquiry)
+            st.markdown(st.session_state["last_insight"]) #Always Show Past Results
+
+            #Feedback Loop 
+            if "last_insight" in st.session_state:
+                # Ask For Feedback
+                if "feedback_given" not in st.session_state:
+                    st.write("Satisfied With The Results?")
+                    col1,col2 = st.columns(2)
+                    with col1:
+                        if st.button("Yes"):
+                            st.session_state["feedback_given"] = "Yes"
+                    with col2:
+                        if st.button("No"):
+                            st.session_state["feedback_given"] = "No"
+
+                # 2A If no ask for clarifications 
+                if st.session_state.get("feedback_given") == "No" :   # and "feedback_question" not in st.session_state:
+                    with st.form("feedback_form"):
+                        feedback_question = st.text_input("Enter your clarification or new question",key="feedback_question")
+                        submitted_feedback = st.form_submit_button("Iterate")
+                        if feedback_question and submitted_feedback:
+                            new_insight = analyze_data(result_data,feedback_question,st.session_state["last_insight"])
+                            st.markdown(new_insight)
+                            st.session_state["last_insight"] = new_insight  # update the latest
+                            st.session_state["feedback_question_user"] = feedback_question
+                            st.session_state["feedback_given"] = "Yes"
+
+                # 2B if Yes the go to Vis
+                if st.session_state.get("feedback_given") == "Yes" and "ai_vis_recomendation" not in st.session_state:
+                    st.subheader("AI Visualization Recommendation")
+                    ai_vis_recomendation = suggest_chart(result_data,
+                                            st.session_state.get("feedback_question_user", st.session_state["analyze_question"]),
+                                            st.session_state["last_insight"])
+                    with st.form("vis_inquiry_form"):
+                        user_vis_inquiry = st.text_input("Choose Which Visualization or Request one : ")
+                        submitted_question_vis = st.form_submit_button("Submit")
+                    if submitted_question_vis and user_vis_inquiry:
+                        gen_visualization(result_data,ai_vis_recomendation,user_vis_inquiry)
 
 
 
