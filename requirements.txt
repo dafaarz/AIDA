@@ -1,5 +1,8 @@
-streamlit
-pandas
 langchain
-langchain_openai
-openai
+langchain-openai
+streamlit
+pyodbc
+pandas
+numpy
+python-dotenv
+rich
